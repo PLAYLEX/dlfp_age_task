@@ -175,3 +175,7 @@ cython_debug/
 
 # Data files
 data
+
+# Resulting models and histories
+*.pth
+*.npy
