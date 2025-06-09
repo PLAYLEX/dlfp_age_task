@@ -1,0 +1,15 @@
+notebook
+numpy
+seaborn
+pandas
+scikit-learn
+tqdm
+ipywidgets
+torch
+torchvision
+torchaudio
+ipykernel
+opencv-python
+pillow
+matplotlib
+kagglehub
