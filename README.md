@@ -65,8 +65,7 @@ Visualized t-SNE to show how data points group together
 - - changed parameter of TSNE call **n_iter** to **max_iter** since this parameter did not exist.
 
  
-
----
+## Extra problems
 
 - Problem: in one server the GPU did not have enough VRam
 - - Compared results between 2 servers with BATCH_SIZE 32 and BATCH_SIZE 16
@@ -75,3 +74,14 @@ Visualized t-SNE to show how data points group together
 - - Maybe the causes are that there were too less Epochs, or smalled batches helped the model
 getting stuck
 - - Later switched to **LARS** and BATCH_SIZE 32 
+
+## Results
+
+SimCLR pre-training training loss and validation loss
+- the results look very good.
+- both training and validation loss are decreasing. 
+- Both losses flatten out towards the later epochs, around epoch 30-50
+
+t-SNE Visulaization
+- After 5 Epochs: The t-SNE visualization showed initial patterns of age-related grouping, but with lots of  mixing between the age categories.
+- After 50 Epochs: The t-SNE plot revealed significantly improved organization. The age group <18 cluster can be seen more easily. Also, a clearer progression from younger to older ages was also visible, which means that extended pre training enabled the model to learn more age correlated features.
