@@ -5,6 +5,58 @@ import matplotlib.pyplot as plt
 from torchvision.io import decode_image
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torch.nn as nn
+
+# Taken from https://github.com/hamkerlab/DL_for_practitioners/blob/main/06_1_SSL_SimCLR/06_1_SSL_SimCLR.ipynb
+class SimCLR_Loss(nn.Module):
+    def __init__(self, batch_size, temperature):
+        super().__init__()
+        self.batch_size = batch_size
+        self.temperature = temperature
+
+        self.mask = self._mask_correlated_samples(batch_size)
+        self.criterion = nn.CrossEntropyLoss(reduction="sum")
+        self.similarity_f = nn.CosineSimilarity(dim=2)
+
+    def _mask_correlated_samples(self, batch_size):
+        N = 2 * batch_size
+        mask = torch.ones((N, N), dtype=bool)
+        mask = mask.fill_diagonal_(0)
+
+        for i in range(batch_size):
+            mask[i, batch_size + i] = 0
+            mask[batch_size + i, i] = 0
+        return mask
+
+    def forward(self, z_i, z_j):
+        actual_b_size = z_i.shape[0]
+        if actual_b_size != self.batch_size:
+            print(f"WARNING: batch size from z_i ({actual_b_size}) != self.batch_size ({self.batch_size})")
+            
+        N = 2 * self.batch_size
+
+        z = torch.cat((z_i, z_j), dim=0)
+        sim = self.similarity_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+
+        sim_i_j = torch.diag(sim, diagonal=self.batch_size) #torch.diag(input = sim, diagonal = self.batch_size)
+        sim_j_i = torch.diag(input = sim, diagonal =-self.batch_size)
+        
+        if sim_i_j.nelement() == 0 or sim_j_i.nelement() == 0: # Check if empty
+            print("ERROR: sim_i_j or sim_j_i is empty!")
+            print(f"Shape of sim: {sim.shape}, diagonal for sim_i_j: {actual_b_size}")
+
+        # We have 2N samples
+        positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).reshape(N, 1)
+        negative_samples = sim[self.mask].reshape(N, -1)
+
+        #SIMCLR
+        labels = torch.from_numpy(np.array([0]*N)).reshape(-1).to(positive_samples.device).long() #.float()
+
+        logits = torch.cat((positive_samples, negative_samples), dim=1)
+        loss = self.criterion(logits, labels)
+        loss /= N
+
+        return loss
 
 def create_df_with_age_categories(dataset_path):
     data = []
@@ -122,6 +174,30 @@ class AgeDataset(Dataset):
 
         return image, label
 
+class UTKFaceSimCLRDataset(Dataset):
+    def __init__(self, image_paths, labels, image_size, transform=None):
+        self.image_paths = image_paths.values
+        self.labels = labels.values
+        self.image_size = image_size
+        self.transform = transform
+
+        # Create a mapping from age categories to numeric labels
+        self.label_to_index = {label: idx for idx, label in enumerate(np.unique(labels))}
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        image = decode_image(img_path)
+        label = self.labels[idx]
+        label = self.label_to_index[label]
+        label = torch.tensor(label, dtype=torch.long)
+
+        x_i = self.transform(image)
+        x_j = self.transform(image)
+        return x_i, x_j, label
+
 def create_datasets_loader(X, y, transform, batch_size=32, shuffle=True, num_workers=0):
     """
     Create a DataLoader for the AgeDataset (e.g. UTKFace or AgeDB).
@@ -142,6 +218,13 @@ def create_datasets_loader(X, y, transform, batch_size=32, shuffle=True, num_wor
     dataset = AgeDataset(image_paths=X, labels=y, transform=transform)
     # create dataloader
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=torch.cuda.is_available())
+    return dataset, dataloader
+
+def create_datasets_loader_simclr(X, y, transform, batch_size=32, shuffle=True, num_workers=0):
+    # create dataset
+    dataset = UTKFaceSimCLRDataset(image_paths=X, labels=y, image_size=224, transform=transform)
+    # create dataloader
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=True, pin_memory=torch.cuda.is_available())
     return dataset, dataloader
 
 # Funktion zum Anzeigen von Bildern mit Labels und Pfaden

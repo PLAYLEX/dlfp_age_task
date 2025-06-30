@@ -12,7 +12,84 @@ from typing import List, Tuple, Dict, Optional, Union
 import pandas as pd
 
 from Utils.little_helpers import get_overlap, get_bboxes
+from sklearn.manifold import TSNE
 
+def simple_loss_plot(train_losses, val_losses, MODEL_NAME: str = "coatnet_0_224", title="Epoch vs. Loss") -> None:
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'{MODEL_NAME}_loss_plot.png')
+    plt.show()
+
+# taken from https://github.com/hamkerlab/DL_for_practitioners/blob/c80d72b77250a7dee47a9e79182af424faffedea/Utils/plotting.py
+def visualize_embeddings_tsne(embeddings: np.ndarray | torch.Tensor,
+                              labels: np.ndarray | torch.Tensor,
+                              output_dir: str | None, # type hint for output_dir
+                              class_names: list[str], # type hint for class_names
+                              n_samples: int = 2000,
+                              num_components: int = 2,
+                              title_suffix: str = "") -> None: # Added title_suffix
+    try:
+
+        # check if data is numpy
+        if torch.is_tensor(embeddings):
+            embeddings = embeddings.cpu().numpy()
+        if torch.is_tensor(labels):
+            labels = labels.cpu().numpy()
+
+        # Subsample if too many points
+        if len(embeddings) > n_samples:
+            print(f"Subsampling {n_samples} out of {len(embeddings)} for t-SNE.")
+            indices = np.random.choice(len(embeddings), n_samples, replace=False)
+            embeddings = embeddings[indices]
+            labels = labels[indices]
+
+        # Apply t-SNE
+        print("Applying t-SNE... (this may take a while)")
+        #tsne = TSNE(n_components=num_components, random_state=SEED, perplexity=30, n_iter=1000, init='pca', learning_rate='auto') # Added init and lr
+        tsne = TSNE(n_components=num_components, random_state=42, perplexity=30, max_iter=1000, init='pca', learning_rate='auto') # Added init and lr
+        embeddings_2d = tsne.fit_transform(embeddings)
+        print("t-SNE done.")
+
+        # Plot
+        plt.figure(figsize=(12, 10))
+        unique_labels = np.unique(labels)
+        for class_label_val in unique_labels:
+            if int(class_label_val) < len(class_names):
+                 class_name_str = class_names[int(class_label_val)]
+            else:
+                 class_name_str = f"Class {int(class_label_val)}" # Fallback if class_names is too short
+
+            indices = labels == class_label_val
+            plt.scatter(embeddings_2d[indices, 0], embeddings_2d[indices, 1], label=class_name_str, alpha=0.7)
+
+        plt.title(f't-SNE Visualization of Encoder Embeddings {title_suffix}')
+        plt.xlabel("t-SNE Component 1")
+        plt.ylabel("t-SNE Component 2")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True) # Ensure dir exists
+            
+            base_filename = f'embeddings_tsne{title_suffix.replace(" ", "_")}.png'
+            full_save_path = os.path.join(output_dir, base_filename)
+            
+            plt.savefig(full_save_path, dpi=300)
+            print(f"t-SNE plot saved to {full_save_path}")
+            plt.close() # Close plot if saving to file to prevent display issues in loops
+        else:
+            plt.show()
+
+    except ImportError:
+        print("scikit-learn not installed, skipping embedding visualization for t-SNE.")
+    except Exception as e:
+        print(f"An error occurred during t-SNE visualization: {e}")
 
 def visualize_training_results(train_losses: List[float],
                                train_accs: List[float],

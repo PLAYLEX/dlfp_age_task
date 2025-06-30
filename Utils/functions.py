@@ -8,6 +8,7 @@ from tqdm import tqdm
 from typing import Dict, List, Tuple, Optional, Union, Any, Type
 import pandas as pd
 import numpy as np
+import time
 
 
 def train_model(
@@ -134,6 +135,105 @@ def train_model(
 
     return history
 
+def train_model_simclr(
+        model: nn.Module,
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        criterion: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Optional[LRScheduler],
+        device: torch.device,
+        num_epochs: int = 10,
+        COATNET_MODEL_NAME: str = "coatnet_0_224",  # Name of the model for saving checkpoints
+) -> Dict[str, List[float]]:
+    # --- Training Loop ---
+    print(f"Starting SimCLR pre-training with {COATNET_MODEL_NAME} for {num_epochs} epochs...")
+
+    history: Dict[str, List[float]] = {
+        'train_loss': [],
+        'val_loss': []
+    }
+    # train_losses, val_losses = [], []
+
+    best_val_loss = float('inf')
+    # best_epoch = -1
+    PATH_TO_BEST_ENCODER_WEIGHTS = f'./{COATNET_MODEL_NAME}_simclr_encoder_best_val_loss.pth'
+    model.train()
+    model.to(device)
+
+    for epoch in range(num_epochs):
+        epoch_start_time = time.time()
+
+        #  Training Phase
+        total_train_loss = 0
+        pbar_train = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]", leave=False)
+        for x_i, x_j, _ in pbar_train:
+            # Move data to device
+            x_i, x_j = x_i.to(device), x_j.to(device)
+
+            # Zero the parameter gradients
+            optimizer.zero_grad()
+
+            # Forward pass
+            z_i = model(x_i)
+            z_j = model(x_j)
+
+            # Compute loss
+            loss = criterion(z_i, z_j)
+
+            # Backward pass and optimize
+            loss.backward()
+            optimizer.step()
+            total_train_loss += loss.item()
+
+            # Update progress bar
+            pbar_train.set_postfix({"Loss": loss.item()})
+
+        # Calculate average training loss
+        avg_train_loss = total_train_loss / len(train_loader)
+
+        #  Validation Phase
+        model.eval()
+        model.to(device)
+        total_val_loss = 0
+        with torch.no_grad():
+            pbar_val = tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Val]", leave=False)
+            for x_i, x_j, _ in pbar_val:
+                x_i, x_j = x_i.to(device), x_j.to(device)
+                z_i = model(x_i)
+                z_j = model(x_j)
+                loss = criterion(z_i, z_j)
+                total_val_loss += loss.item()
+                pbar_val.set_postfix({"Loss": loss.item()})
+        avg_val_loss = total_val_loss / len(val_loader) if len(val_loader) > 0 else 0
+        
+        # Scheduler step
+        scheduler.step()
+
+        # Store losses
+        history['train_loss'].append(avg_train_loss)
+        history['val_loss'].append(avg_val_loss)
+        # val_losses.append(avg_val_loss)
+        # train_losses.append(avg_train_loss)
+
+        current_lr = optimizer.param_groups[0]['lr']
+        epoch_time_taken = (time.time() - epoch_start_time) / 60
+
+        print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f} - Val Loss: {avg_val_loss:.4f} - LR: {current_lr:.6f} - Time: {epoch_time_taken:.2f} min")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(model.encoder.state_dict(), PATH_TO_BEST_ENCODER_WEIGHTS)
+            print(f"Epoch {epoch+1}: New best SSL validation loss: {avg_val_loss:.4f}. Saved encoder to {PATH_TO_BEST_ENCODER_WEIGHTS}")
+
+
+        if (epoch + 1) % 10 == 0 or (epoch + 1) == num_epochs:
+            save_path = f'./{COATNET_MODEL_NAME}_simclr_epoch_{epoch+1}.pth'
+            torch.save(model.encoder.state_dict(), save_path)
+            print(f"Saved pre-trained encoder to {save_path}")
+
+    print("SimCLR Pre-training finished!")
+    return history
 
 def evaluate_model(
         model: nn.Module,
