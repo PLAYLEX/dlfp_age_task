@@ -1,43 +1,80 @@
 import torch
 from torchvision import transforms, models
-from PIL import Image
-import os
+from dataset import UTKFaceDataset
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 
-# Define the same transform used during training
+# Define same transform used during training
 transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.ToTensor()
 ])
 
-# Load the trained model
-model = models.resnet18(weights=None)  # Use weights='DEFAULT' if pretrained
-model.fc = torch.nn.Linear(model.fc.in_features, 1)  # Age is a single value
+# Load dataset
+dataset = UTKFaceDataset(root_dir='data/UTKFace', transform=transform)
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
-# Load your trained weights
-model.load_state_dict(torch.load("age_model.pth", map_location=torch.device("cpu")))
+# Load model
+from coatnet import coatnet_0
+model = coatnet_0(num_classes=4)
+model.load_state_dict(torch.load("coatnet_finetuned.pth", map_location=torch.device("cpu")))
 model.eval()
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
-# Folder where your images are
-folder = "data/UTKFace"
+print("\n📸 Evaluating images...")
 
-# Get only image files and skip hidden/system files like .DS_Store
-images = [f for f in os.listdir(folder) if f.endswith(('.jpg', '.jpeg', '.png'))]
-images = sorted(images)[:5]  # You can change to more or fewer
+# Initialize variables for overall accuracy and per-class
+correct = 0
+total = 0
+num_classes = 4
+class_correct = [0] * num_classes
+class_total = [0] * num_classes
 
-print("📷 Evaluating images...\n")
+true_labels = []
+predicted_labels = []
 
-for fname in images:
-    img_path = os.path.join(folder, fname)
-    img = Image.open(img_path).convert("RGB")
-    tensor = transform(img).unsqueeze(0).to(device)
+with torch.no_grad():
+    for images, labels in dataloader:
+        images = images.to(device)
+        labels = labels.to(device)
 
-    with torch.no_grad():
-        prediction = model(tensor).item()
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
 
-    print(f"{fname} → Predicted Age: {round(prediction, 2)}")
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
 
-print("\n✅ Evaluation completed.")
+        for i in range(labels.size(0)):
+            label = labels[i].item()
+            pred = predicted[i].item()
+            class_correct[label] += int(pred == label)
+            class_total[label] += 1
+
+        true_labels.append(labels.item())
+        predicted_labels.append(predicted.item())
+
+        print(f"File evaluated -> True label: {labels.item()}, Predicted: {predicted.item()}")
+
+# Overall accuracy
+accuracy = 100 * correct / total
+print(f"\n✅ Overall Evaluation Accuracy: {accuracy:.2f}%")
+
+# Per-class accuracy
+print("\n📊 Per-class accuracy:")
+for i in range(num_classes):
+    if class_total[i] > 0:
+        acc = 100 * class_correct[i] / class_total[i]
+        print(f"Class {i}: {acc:.2f}% ({class_correct[i]}/{class_total[i]})")
+    else:
+        print(f"Class {i}: N/A (no samples)")
+
+# Confusion matrix
+cm = confusion_matrix(true_labels, predicted_labels)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["<18", "18-40", "41-60", ">60"])
+disp.plot(cmap="Blues")
+plt.title("Confusion Matrix")
+plt.savefig("confusion_matrix_result.png")
+plt.show()

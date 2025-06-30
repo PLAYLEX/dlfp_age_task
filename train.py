@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms, models
-from dataset import UTKFaceDataset
+from torchvision import transforms
+from dataset import UTKFaceDataset          # keep your custom dataset file
+from coatnet import coatnet_0               # make sure coatnet.py is present in your project
 
 # Step 1: Image Transformations
 transform = transforms.Compose([
@@ -11,14 +12,12 @@ transform = transforms.Compose([
     transforms.ToTensor()
 ])
 
-# Step 2: Load dataset (no 'train=True' used)
+# Step 2: Load Dataset
 dataset = UTKFaceDataset(root_dir='data/UTKFace', transform=transform)
 dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
-# Step 3: Load Model (Classification Output)
-model = models.resnet18(weights=None)
-model.fc = nn.Linear(model.fc.in_features, 4)  # 4 age bins
-
+# Step 3: Load Model (CoAtNet)
+model = coatnet_0(num_classes=4)  # 4 age bins
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
@@ -32,9 +31,9 @@ for epoch in range(10):  # 10 epochs
     total_loss = 0
     correct = 0
     total = 0
+
     for imgs, labels in dataloader:
-        imgs = imgs.to(device)
-        labels = labels.to(device)
+        imgs, labels = imgs.to(device), labels.to(device)
 
         optimizer.zero_grad()
         outputs = model(imgs)
@@ -43,14 +42,14 @@ for epoch in range(10):  # 10 epochs
         optimizer.step()
 
         total_loss += loss.item()
-
-        _, predicted = torch.max(outputs.data, 1)
-        correct += (predicted == labels).sum().item()
+        _, predicted = outputs.max(1)
+        correct += predicted.eq(labels).sum().item()
         total += labels.size(0)
 
-    accuracy = 100 * correct / total
-    print(f"✅ Epoch {epoch+1} completed | Loss: {total_loss:.4f} | Accuracy: {accuracy:.2f}%")
+    acc = 100. * correct / total
+    avg_loss = total_loss / len(dataloader)
+    print(f"Epoch [{epoch+1}/10] - Loss: {avg_loss:.4f}, Accuracy: {acc:.2f}%")
 
-# Save the model
-torch.save(model.state_dict(), "age_model_classification.pth")
-print("✅ Training finished. Model saved as age_model_classification.pth")
+# Save model
+torch.save(model.state_dict(), "coatnet_finetuned.pth")
+print("✅ Training completed and model saved as coatnet_finetuned.pth")
